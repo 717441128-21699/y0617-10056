@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 
 interface Props {
   content: string;
@@ -46,7 +46,13 @@ function renderMarkdown(md: string): string {
 }
 
 export default function MarkdownEditor({ content, onChange }: Props) {
-  const previewHtml = useMemo(() => renderMarkdown(content), [content]);
+  const [localValue, setLocalValue] = useState(content);
+
+  useEffect(() => {
+    setLocalValue(content);
+  }, [content]);
+
+  const previewHtml = useMemo(() => renderMarkdown(localValue), [localValue]);
 
   return (
     <div className="h-full flex">
@@ -55,9 +61,10 @@ export default function MarkdownEditor({ content, onChange }: Props) {
           Markdown
         </div>
         <textarea
-          value={content}
+          value={localValue}
           onChange={e => {
             const md = e.target.value;
+            setLocalValue(md);
             onChange(renderMarkdown(md), md);
           }}
           className="flex-1 p-4 font-mono text-sm resize-none outline-none bg-white"

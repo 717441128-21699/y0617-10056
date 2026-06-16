@@ -232,6 +232,19 @@ export const dbQueries = {
 
   getVersion: (id: string): Version | undefined => data.versions.find(v => v.id === id),
 
+  isDescendantOf: (childId: string, ancestorId: string): boolean => {
+    const visited = new Set<string>();
+    let currentId: string | null = childId;
+    while (currentId) {
+      if (currentId === ancestorId) return true;
+      if (visited.has(currentId)) return false;
+      visited.add(currentId);
+      const doc = data.documents.find(d => d.id === currentId);
+      currentId = doc?.parentId || null;
+    }
+    return false;
+  },
+
   searchDocuments: (query: string, spaceId?: string): (Document & { rank: number })[] => {
     const docs = spaceId ? data.documents.filter(d => d.spaceId === spaceId) : data.documents;
     return simpleSearch(query, docs);

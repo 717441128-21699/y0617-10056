@@ -96,7 +96,11 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     setCurrentUser(userId);
     const user = get().users.find(u => u.id === userId);
     if (user) {
-      set({ currentUser: user });
+      set({ currentUser: user, currentDocId: null, currentDoc: null });
+    }
+    const spaceId = get().currentSpaceId;
+    if (spaceId) {
+      await get().loadDocuments(spaceId);
     }
   },
 
@@ -131,7 +135,12 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
       set({ currentDoc: doc, loading: false });
       await get().loadVersions(docId);
     } catch (error: any) {
-      set({ error: error.message, loading: false });
+      if (error?.response?.status === 403) {
+        set({ currentDocId: null, currentDoc: null, loading: false });
+        alert('无权访问此文档');
+      } else {
+        set({ error: error.message, loading: false });
+      }
     }
   },
 
@@ -148,10 +157,18 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   },
 
   moveDoc: async (id: string, params) => {
-    await docsApi.move(id, params);
-    const spaceId = get().currentSpaceId;
-    if (spaceId) {
-      await get().loadDocuments(spaceId);
+    try {
+      await docsApi.move(id, params);
+      const spaceId = get().currentSpaceId;
+      if (spaceId) {
+        await get().loadDocuments(spaceId);
+      }
+    } catch (error: any) {
+      alert(error?.response?.data?.error || '移动失败');
+      const spaceId = get().currentSpaceId;
+      if (spaceId) {
+        await get().loadDocuments(spaceId);
+      }
     }
   },
 

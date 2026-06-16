@@ -28,8 +28,9 @@ function TreeNode({ node, depth }: { node: DocTreeNode; depth: number }) {
     accept: 'DOC_ITEM',
     canDrop: (item) => {
       if (item.id === node.id) return false;
-      const descendants = getDescendantIds(documents, node.id);
-      return !descendants.has(item.id);
+      const dragDescendants = getDescendantIds(documents, item.id);
+      if (dragDescendants.has(node.id)) return false;
+      return true;
     },
     drop: (item, monitor) => {
       const didDrop = monitor.didDrop();
@@ -42,11 +43,6 @@ function TreeNode({ node, depth }: { node: DocTreeNode; depth: number }) {
         if (targetDoc) {
           const siblings = documents.filter(d => d.parentId === targetDoc.parentId);
           const idx = siblings.findIndex(s => s.id === node.id);
-          siblings.forEach((s, i) => {
-            if (i >= idx && s.id !== item.id) {
-              moveDoc(s.id, { sortOrder: i + 1 });
-            }
-          });
           moveDoc(item.id, { parentId: targetDoc.parentId, sortOrder: idx });
         }
       }

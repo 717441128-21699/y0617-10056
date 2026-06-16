@@ -6,7 +6,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { WebSocketServer, WebSocket } from 'ws';
-import type { Duplex } from 'stream';
+import { dbQueries } from './db.js';
 
 const wsReadyStateConnecting = 0;
 const wsReadyStateOpen = 1;
@@ -16,10 +16,6 @@ const docs = new Map<string, { doc: Y.Doc; conns: Set<WebSocket> }>();
 const messageSync = 0;
 const messageAwareness = 1;
 const messageAuth = 2;
-
-interface WSMessageEvent {
-  data: ArrayBuffer;
-}
 
 function getDoc(name: string) {
   let docData = docs.get(name);
@@ -146,8 +142,8 @@ export function setupSocketIO(io: Server) {
       }
       onlineUsers.get(docId)!.set(socket.id, {
         id: userId,
-        name: userName,
-        avatar: userAvatar,
+        name: decodeURIComponent(userName),
+        avatar: decodeURIComponent(userAvatar),
         socketId: socket.id,
       });
 
@@ -166,7 +162,15 @@ export function setupSocketIO(io: Server) {
     });
 
     socket.on('doc-updated', ({ docId }: { docId: string }) => {
-      socket.to(`doc:${docId}`).emit('doc-changed', { docId });
+      const doc = dbQueries.getDocument(docId);
+      if (doc) {
+        socket.to(`doc:${docId}`).emit('doc-changed', {
+          docId,
+          title: doc.title,
+          content: doc.content,
+          markdown: doc.markdown,
+        });
+      }
     });
 
     socket.on('disconnect', () => {

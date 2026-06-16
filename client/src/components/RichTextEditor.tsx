@@ -3,9 +3,6 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TurndownService from 'turndown';
-import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
-import { IndexeddbPersistence } from 'y-indexeddb';
 
 const turndown = new TurndownService({
   headingStyle: 'atx',
@@ -22,21 +19,15 @@ interface Props {
 }
 
 export default function RichTextEditor({ docId, content, onChange, userId, userName, userColor }: Props) {
-  const ydocRef = useRef<Y.Doc | null>(null);
-  const providerRef = useRef<WebsocketProvider | null>(null);
-  const persistenceRef = useRef<IndexeddbPersistence | null>(null);
-  const contentLoadedRef = useRef(false);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        history: true,
-      }),
-      Placeholder.configure({
-        placeholder: '开始输入内容...',
-      }),
+      StarterKit.configure({ history: true }),
+      Placeholder.configure({ placeholder: '开始输入内容...' }),
     ],
-    content,
+    content: content || '<p></p>',
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
       let markdown = '';
@@ -45,79 +36,20 @@ export default function RichTextEditor({ docId, content, onChange, userId, userN
       } catch {
         markdown = '';
       }
-      onChange(html, markdown);
-
-      if (ydocRef.current) {
-        const ytext = ydocRef.current.getText('content');
-        const currentMd = ytext.toString();
-        if (currentMd !== markdown) {
-          ytext.delete(0, currentMd.length);
-          ytext.insert(0, markdown);
-        }
-      }
+      onChangeRef.current(html, markdown);
     },
   });
 
   useEffect(() => {
-    if (!docId) return;
-
-    const ydoc = new Y.Doc();
-    ydocRef.current = ydoc;
-
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.host;
-    const provider = new WebsocketProvider(
-      `${wsProtocol}//${wsHost}`,
-      `yjs/${docId}`,
-      ydoc,
-    );
-    providerRef.current = provider;
-
-    const persistence = new IndexeddbPersistence(docId, ydoc);
-    persistenceRef.current = persistence;
-
-    if (userId && userName) {
-      provider.awareness.setLocalStateField('user', {
-        name: userName,
-        color: userColor || '#3B82F6',
-      });
-    }
-
-    const ytext = ydoc.getText('content');
-    ytext.observe(() => {
-      const remoteMd = ytext.toString();
-      if (editor && contentLoadedRef.current) {
-        const currentHtml = editor.getHTML();
-        let currentMd = '';
-        try {
-          currentMd = turndown.turndown(currentHtml);
-        } catch {}
-        if (remoteMd !== currentMd) {
-          // 简单处理：同步时不覆盖本地（实际 CRDT 需更复杂处理）
-        }
-      }
-    });
-
-    persistence.on('synced', () => {
-      contentLoadedRef.current = true;
-      const persistedMd = ytext.toString();
-      if (persistedMd && editor) {
-        // 有持久化内容时不覆盖，避免丢失
-      }
-    });
-
-    return () => {
-      provider.destroy();
-      persistence.destroy();
-      ydoc.destroy();
-      contentLoadedRef.current = false;
-    };
-  }, [docId, editor]);
-
-  useEffect(() => {
     if (!editor) return;
-    if (content !== editor.getHTML()) {
-      editor.commands.setContent(content || '<p></p>');
+    const currentHtml = editor.getHTML();
+    const newContent = content || '<p></p>';
+    if (currentHtml !== newContent && newContent !== '<p></p>') {
+      const { from } = editor.state.selection;
+      editor.commands.setContent(newContent);
+      try {
+        editor.commands.setTextSelection(Math.min(from, editor.state.doc.content.size));
+      } catch {}
     }
   }, [content, editor]);
 

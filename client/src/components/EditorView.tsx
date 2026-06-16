@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAppStore } from '../store';
 import RichTextEditor from './RichTextEditor';
@@ -10,23 +10,24 @@ import { formatTime } from '../utils';
 import type { EditorMode } from '../types';
 
 export default function EditorView() {
-  const {
-    currentDoc,
-    currentUser,
-    editorMode,
-    setEditorMode,
-    updateDoc,
-    saveDraft,
-    getDraft,
-    clearDraft,
-    setOnlineUsers,
-  } = useAppStore();
+  const currentDoc = useAppStore(s => s.currentDoc);
+  const currentUser = useAppStore(s => s.currentUser);
+  const editorMode = useAppStore(s => s.editorMode);
+  const setEditorMode = useAppStore(s => s.setEditorMode);
+  const updateDoc = useAppStore(s => s.updateDoc);
+  const saveDraft = useAppStore(s => s.saveDraft);
+  const getDraft = useAppStore(s => s.getDraft);
+  const clearDraft = useAppStore(s => s.clearDraft);
+  const setOnlineUsers = useAppStore(s => s.setOnlineUsers);
 
   const socketRef = useRef<Socket | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const localTitleRef = useRef('');
-  const localContentRef = useRef('');
-  const localMarkdownRef = useRef('');
+  const lastSavedDocIdRef = useRef<string | null>(null);
+  const isRemoteUpdateRef = useRef(false);
+
+  const [localTitle, setLocalTitle] = useState('');
+  const [localContent, setLocalContent] = useState('');
+  const [localMarkdown, setLocalMarkdown] = useState('');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -38,15 +39,9 @@ export default function EditorView() {
       },
     });
     socketRef.current = socket;
-
-    socket.on('online-users', (users) => {
-      setOnlineUsers(users);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [currentUser, setOnlineUsers]);
+    socket.on('online-users', (users) => setOnlineUsers(users));
+    return () => { socket.disconnect(); };
+  }, [currentUser?.id, setOnlineUsers]);
 
   useEffect(() => {
     if (!currentDoc || !socketRef.current) return;
@@ -54,108 +49,105 @@ export default function EditorView() {
 
     socket.emit('join-doc', { docId: currentDoc.id });
 
-    socket.on('doc-changed', () => {
-      useAppStore.getState().selectDoc(currentDoc.id);
-    });
+    const handler = ({ docId, title, content, markdown }: { docId: string; title?: string; content?: string; markdown?: string }) => {
+      if (docId !== currentDoc.id) return;
+      if (title !== undefined && content !== undefined && markdown !== undefined) {
+        isRemoteUpdateRef.current = true;
+        setLocalTitle(title);
+        setLocalContent(content);
+        setLocalMarkdown(markdown);
+        isRemoteUpdateRef.current = false;
+      } else {
+        useAppStore.getState().selectDoc(currentDoc.id);
+      }
+    };
+    socket.on('doc-changed', handler);
 
     return () => {
       socket.emit('leave-doc', { docId: currentDoc.id });
+      socket.off('doc-changed', handler);
       setOnlineUsers([]);
     };
   }, [currentDoc?.id, setOnlineUsers]);
 
   useEffect(() => {
-    if (!currentDoc) return;
+    if (!currentDoc) {
+      setLocalTitle('');
+      setLocalContent('');
+      setLocalMarkdown('');
+      lastSavedDocIdRef.current = null;
+      return;
+    }
+
+    if (lastSavedDocIdRef.current === currentDoc.id) return;
+    lastSavedDocIdRef.current = currentDoc.id;
 
     const draft = getDraft(currentDoc.id);
     if (draft && draft.savedAt > currentDoc.updatedAt) {
       if (confirm('发现未保存的草稿，是否恢复？')) {
-        localTitleRef.current = draft.title;
-        localContentRef.current = draft.content;
-        localMarkdownRef.current = draft.markdown;
+        setLocalTitle(draft.title);
+        setLocalContent(draft.content);
+        setLocalMarkdown(draft.markdown);
         return;
       } else {
         clearDraft(currentDoc.id);
       }
     }
 
-    localTitleRef.current = currentDoc.title;
-    localContentRef.current = currentDoc.content;
-    localMarkdownRef.current = currentDoc.markdown;
+    setLocalTitle(currentDoc.title);
+    setLocalContent(currentDoc.content);
+    setLocalMarkdown(currentDoc.markdown);
   }, [currentDoc?.id, currentDoc?.updatedAt]);
 
   const triggerAutoSave = useCallback(() => {
     if (!currentDoc) return;
-
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-    }
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
 
     autoSaveTimerRef.current = setTimeout(async () => {
-      const title = localTitleRef.current;
-      const content = localContentRef.current;
-      const markdown = localMarkdownRef.current;
+      if (isRemoteUpdateRef.current) return;
 
-      if (
-        title !== currentDoc.title ||
-        content !== currentDoc.content ||
-        markdown !== currentDoc.markdown
-      ) {
-        saveDraft(currentDoc.id, {
-          title,
-          content,
-          markdown,
-          savedAt: Date.now(),
-        });
+      const title = localTitle;
+      const content = localContent;
+      const markdown = localMarkdown;
+      const latestDoc = useAppStore.getState().currentDoc;
+      if (!latestDoc) return;
 
-        await updateDoc(currentDoc.id, {
-          title,
-          content,
-          markdown,
-        });
-
-        clearDraft(currentDoc.id);
-
-        socketRef.current?.emit('doc-updated', { docId: currentDoc.id });
+      if (title !== latestDoc.title || content !== latestDoc.content || markdown !== latestDoc.markdown) {
+        saveDraft(latestDoc.id, { title, content, markdown, savedAt: Date.now() });
+        await updateDoc(latestDoc.id, { title, content, markdown });
+        clearDraft(latestDoc.id);
+        socketRef.current?.emit('doc-updated', { docId: latestDoc.id });
       }
     }, 2000);
-  }, [currentDoc, updateDoc, saveDraft, clearDraft]);
+  }, [currentDoc?.id, localTitle, localContent, localMarkdown, updateDoc, saveDraft, clearDraft]);
 
   const handleContentChange = useCallback((content: string, markdown: string) => {
-    localContentRef.current = content;
-    localMarkdownRef.current = markdown;
+    setLocalContent(content);
+    setLocalMarkdown(markdown);
     triggerAutoSave();
   }, [triggerAutoSave]);
 
   const handleTitleChange = useCallback((title: string) => {
-    localTitleRef.current = title;
+    setLocalTitle(title);
     triggerAutoSave();
   }, [triggerAutoSave]);
-
-  const handleModeChange = useCallback((mode: EditorMode) => {
-    setEditorMode(mode);
-  }, [setEditorMode]);
 
   const handleSaveVersion = useCallback(async () => {
     if (!currentDoc) return;
     const message = prompt('版本说明（可选）:');
     await updateDoc(currentDoc.id, {
-      title: localTitleRef.current,
-      content: localContentRef.current,
-      markdown: localMarkdownRef.current,
+      title: localTitle,
+      content: localContent,
+      markdown: localMarkdown,
       saveVersion: true,
       versionMessage: message || undefined,
     });
     clearDraft(currentDoc.id);
     alert('版本已保存');
-  }, [currentDoc, updateDoc, clearDraft]);
+  }, [currentDoc?.id, localTitle, localContent, localMarkdown, updateDoc, clearDraft]);
 
   useEffect(() => {
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-      }
-    };
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   }, []);
 
   if (!currentDoc) {
@@ -179,7 +171,7 @@ export default function EditorView() {
           <div className="flex items-center gap-4">
             <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
               <button
-                onClick={() => handleModeChange('richtext')}
+                onClick={() => setEditorMode('richtext')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                   editorMode === 'richtext' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
@@ -187,7 +179,7 @@ export default function EditorView() {
                 富文本
               </button>
               <button
-                onClick={() => handleModeChange('markdown')}
+                onClick={() => setEditorMode('markdown')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                   editorMode === 'markdown' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
@@ -216,14 +208,12 @@ export default function EditorView() {
         <div className="border-b border-gray-100 px-8 pt-6">
           <input
             type="text"
-            value={localTitleRef.current}
+            value={localTitle}
             onChange={e => handleTitleChange(e.target.value)}
             placeholder="无标题文档"
             className="w-full text-3xl font-bold text-gray-900 placeholder-gray-300 outline-none bg-transparent"
           />
-          <div className="mt-2 mb-4 text-xs text-gray-400">
-            编辑时自动保存草稿
-          </div>
+          <div className="mt-2 mb-4 text-xs text-gray-400">编辑时自动保存草稿</div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -231,7 +221,7 @@ export default function EditorView() {
             <RichTextEditor
               key={currentDoc.id}
               docId={currentDoc.id}
-              content={localContentRef.current}
+              content={localContent}
               onChange={handleContentChange}
               userId={currentUser?.id}
               userName={currentUser?.name}
@@ -239,7 +229,8 @@ export default function EditorView() {
             />
           ) : (
             <MarkdownEditor
-              content={localMarkdownRef.current}
+              key={currentDoc.id}
+              content={localMarkdown}
               onChange={handleContentChange}
             />
           )}

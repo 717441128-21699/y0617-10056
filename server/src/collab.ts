@@ -127,15 +127,52 @@ interface OnlineUser {
 }
 
 export const onlineUsers = new Map<string, Map<string, OnlineUser>>();
+const socketJoinedDocs = new Map<string, Set<string>>();
+
+function canUserAccess(docId: string, userId: string): boolean {
+  const doc = dbQueries.getDocument(docId);
+  if (!doc) return false;
+  if (doc.permission === 'public') return true;
+  if (doc.permission === 'team') return true;
+  if (doc.createdBy === userId) return true;
+  if (doc.allowedUsers && doc.allowedUsers.some(u => u.userId === userId)) return true;
+  return false;
+}
+
+function kickUnauthorizedSocketsFromRoom(io: Server, docId: string) {
+  const room = io.sockets.adapter.rooms.get(`doc:${docId}`);
+  if (!room) return;
+  room.forEach(socketId => {
+    const s = io.sockets.sockets.get(socketId);
+    if (!s) return;
+    const uid = (s as any).userId as string;
+    if (!canUserAccess(docId, uid)) {
+      s.leave(`doc:${docId}`);
+      s.emit('access-denied', { docId });
+      onlineUsers.get(docId)?.delete(socketId);
+      socketJoinedDocs.get(socketId)?.delete(docId);
+    }
+  });
+  const users = onlineUsers.has(docId) ? Array.from(onlineUsers.get(docId)!.values()) : [];
+  io.to(`doc:${docId}`).emit('online-users', users);
+}
 
 export function setupSocketIO(io: Server) {
   io.on('connection', (socket) => {
     const userId = socket.handshake.headers['x-user-id'] as string || 'user-1';
     const userName = socket.handshake.headers['x-user-name'] as string || '用户';
     const userAvatar = socket.handshake.headers['x-user-avatar'] as string || '#6B7280';
+    (socket as any).userId = userId;
+
+    socketJoinedDocs.set(socket.id, new Set());
 
     socket.on('join-doc', ({ docId }: { docId: string }) => {
+      if (!canUserAccess(docId, userId)) {
+        socket.emit('access-denied', { docId });
+        return;
+      }
       socket.join(`doc:${docId}`);
+      socketJoinedDocs.get(socket.id)!.add(docId);
 
       if (!onlineUsers.has(docId)) {
         onlineUsers.set(docId, new Map());
@@ -147,12 +184,12 @@ export function setupSocketIO(io: Server) {
         socketId: socket.id,
       });
 
-      const users = Array.from(onlineUsers.get(docId)!.values());
-      io.to(`doc:${docId}`).emit('online-users', users);
+      kickUnauthorizedSocketsFromRoom(io, docId);
     });
 
     socket.on('leave-doc', ({ docId }: { docId: string }) => {
       socket.leave(`doc:${docId}`);
+      socketJoinedDocs.get(socket.id)?.delete(docId);
 
       if (onlineUsers.has(docId)) {
         onlineUsers.get(docId)!.delete(socket.id);
@@ -162,8 +199,10 @@ export function setupSocketIO(io: Server) {
     });
 
     socket.on('doc-updated', ({ docId }: { docId: string }) => {
+      if (!canUserAccess(docId, userId)) return;
+      kickUnauthorizedSocketsFromRoom(io, docId);
       const doc = dbQueries.getDocument(docId);
-      if (doc) {
+      if (doc && canUserAccess(docId, (socket as any).userId)) {
         socket.to(`doc:${docId}`).emit('doc-changed', {
           docId,
           title: doc.title,
@@ -174,6 +213,8 @@ export function setupSocketIO(io: Server) {
     });
 
     socket.on('doc-edit', ({ docId, title, content, markdown }: { docId: string; title: string; content: string; markdown: string }) => {
+      if (!canUserAccess(docId, userId)) return;
+      kickUnauthorizedSocketsFromRoom(io, docId);
       socket.to(`doc:${docId}`).emit('doc-edit', {
         docId,
         title,
@@ -184,13 +225,17 @@ export function setupSocketIO(io: Server) {
     });
 
     socket.on('disconnect', () => {
-      onlineUsers.forEach((users, docId) => {
-        if (users.has(socket.id)) {
-          users.delete(socket.id);
-          const remaining = Array.from(users.values());
-          io.to(`doc:${docId}`).emit('online-users', remaining);
-        }
-      });
+      const docs = socketJoinedDocs.get(socket.id);
+      if (docs) {
+        docs.forEach(docId => {
+          if (onlineUsers.has(docId)) {
+            onlineUsers.get(docId)!.delete(socket.id);
+            const remaining = Array.from(onlineUsers.get(docId)!.values());
+            io.to(`doc:${docId}`).emit('online-users', remaining);
+          }
+        });
+      }
+      socketJoinedDocs.delete(socket.id);
     });
   });
 }

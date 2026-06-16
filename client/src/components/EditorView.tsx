@@ -153,12 +153,22 @@ export default function EditorView() {
 
       if (title !== latestDoc.title || content !== latestDoc.content || markdown !== latestDoc.markdown) {
         saveDraft(latestDoc.id, { title, content, markdown, savedAt: Date.now() });
-        await updateDoc(latestDoc.id, { title, content, markdown });
+        const savedDoc = await updateDoc(latestDoc.id, { title, content, markdown });
         clearDraft(latestDoc.id);
+
+        if (savedDoc && (savedDoc.markdown !== markdown || savedDoc.title !== title)) {
+          isRemoteUpdateRef.current = true;
+          setLocalTitle(savedDoc.title);
+          setLocalContent(savedDoc.content);
+          setLocalMarkdown(savedDoc.markdown);
+          syncRefs(savedDoc.title, savedDoc.content, savedDoc.markdown);
+          setTimeout(() => { isRemoteUpdateRef.current = false; }, 50);
+        }
+
         socketRef.current?.emit('doc-updated', { docId: latestDoc.id });
       }
     }, 2000);
-  }, [currentDoc?.id, updateDoc, saveDraft, clearDraft]);
+  }, [currentDoc?.id, updateDoc, saveDraft, clearDraft, syncRefs]);
 
   const handleContentChange = useCallback((content: string, markdown: string) => {
     setLocalContent(content);
@@ -178,17 +188,30 @@ export default function EditorView() {
   const handleSaveVersion = useCallback(async () => {
     if (!currentDoc) return;
     const message = prompt('版本说明（可选）:');
-    await updateDoc(currentDoc.id, {
-      title: localTitleRef.current,
-      content: localContentRef.current,
-      markdown: localMarkdownRef.current,
+    const title = localTitleRef.current;
+    const content = localContentRef.current;
+    const markdown = localMarkdownRef.current;
+    const savedDoc = await updateDoc(currentDoc.id, {
+      title,
+      content,
+      markdown,
       saveVersion: true,
       versionMessage: message || undefined,
     });
     clearDraft(currentDoc.id);
+
+    if (savedDoc && (savedDoc.markdown !== markdown || savedDoc.title !== title)) {
+      isRemoteUpdateRef.current = true;
+      setLocalTitle(savedDoc.title);
+      setLocalContent(savedDoc.content);
+      setLocalMarkdown(savedDoc.markdown);
+      syncRefs(savedDoc.title, savedDoc.content, savedDoc.markdown);
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 50);
+    }
+
     await loadVersions(currentDoc.id);
     alert('版本已保存');
-  }, [currentDoc?.id, updateDoc, clearDraft, loadVersions]);
+  }, [currentDoc?.id, updateDoc, clearDraft, loadVersions, syncRefs]);
 
   useEffect(() => {
     return () => {

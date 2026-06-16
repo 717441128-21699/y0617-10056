@@ -49,6 +49,7 @@ export const docsApi = {
       allowedUsers: DocPermission[];
       saveVersion: boolean;
       versionMessage: string;
+      baseVersion: number;
     }>
   ): Promise<Document> => api.put(`/docs/${id}`, params).then(r => r.data),
   move: (

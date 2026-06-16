@@ -1,0 +1,82 @@
+{
+  "users": [
+    {
+      "id": "user-1",
+      "name": "张三",
+      "avatar": "#3B82F6"
+    },
+    {
+      "id": "user-2",
+      "name": "李四",
+      "avatar": "#10B981"
+    },
+    {
+      "id": "user-3",
+      "name": "王五",
+      "avatar": "#F59E0B"
+    }
+  ],
+  "spaces": [
+    {
+      "id": "43202fec-a1d7-4960-884c-3ca915519b03",
+      "name": "团队知识库",
+      "description": "团队共享的文档空间",
+      "createdAt": 1781650696466,
+      "updatedAt": 1781650696466
+    }
+  ],
+  "documents": [
+    {
+      "id": "0412ee40-113c-47a0-bbbd-30efb9f589c8",
+      "spaceId": "43202fec-a1d7-4960-884c-3ca915519b03",
+      "parentId": null,
+      "title": "产品文档",
+      "content": "",
+      "markdown": "",
+      "type": "folder",
+      "sortOrder": 0,
+      "permission": "team",
+      "allowedUsers": [],
+      "createdBy": "user-1",
+      "updatedBy": "user-1",
+      "createdAt": 1781650696466,
+      "updatedAt": 1781650696466,
+      "version": 1
+    },
+    {
+      "id": "2b6f5006-3b96-4e98-9782-9be1fe0b5747",
+      "spaceId": "43202fec-a1d7-4960-884c-3ca915519b03",
+      "parentId": "0412ee40-113c-47a0-bbbd-30efb9f589c8",
+      "title": "???????",
+      "content": "<p>x</p>",
+      "markdown": "?????????????!\n\n?????????:\n\n- ???? Markdown ??\n- ????\n- ????\n\nA ?????:??????????B ?????:??????????\n\nALICE_PARAGRAPH_123BOB_PARAGRAPH_456",
+      "type": "document",
+      "sortOrder": 0,
+      "permission": "team",
+      "allowedUsers": [],
+      "createdBy": "user-1",
+      "updatedBy": "user-2",
+      "createdAt": 1781650696466,
+      "updatedAt": 1781650754880,
+      "version": 5
+    },
+    {
+      "id": "bb7648c6-8cc0-45f3-bc3b-7cade4152fdd",
+      "spaceId": "43202fec-a1d7-4960-884c-3ca915519b03",
+      "parentId": null,
+      "title": "技术文档",
+      "content": "",
+      "markdown": "",
+      "type": "folder",
+      "sortOrder": 1,
+      "permission": "team",
+      "allowedUsers": [],
+      "createdBy": "user-1",
+      "updatedBy": "user-1",
+      "createdAt": 1781650696466,
+      "updatedAt": 1781650696466,
+      "version": 1
+    }
+  ],
+  "versions": []
+}

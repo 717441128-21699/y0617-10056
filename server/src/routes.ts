@@ -13,7 +13,6 @@ function canUserAccess(doc: Document, userId: string): boolean {
   if (doc.permission === 'public') return true;
   if (doc.permission === 'team') return true;
   if (doc.createdBy === userId) return true;
-  if (doc.updatedBy === userId) return true;
   if (doc.allowedUsers && doc.allowedUsers.some(u => u.userId === userId)) return true;
   return false;
 }
@@ -95,17 +94,52 @@ router.post('/docs', (req, res) => {
   res.status(201).json(doc);
 });
 
+function mergeText(serverCurrent: string, incoming: string): string {
+  if (serverCurrent === incoming) return serverCurrent;
+  const diff = Diff.diffLines(serverCurrent, incoming);
+  const result: string[] = [];
+  for (const part of diff) {
+    if (part.added) {
+      result.push(part.value);
+    } else if (part.removed) {
+      result.push(part.value);
+    } else {
+      result.push(part.value);
+    }
+  }
+  return result.join('');
+}
+
+function mergeTitle(serverTitle: string, incomingTitle: string, serverChanged: boolean, incomingChanged: boolean): string {
+  if (!incomingChanged) return serverTitle;
+  if (!serverChanged) return incomingTitle;
+  if (incomingTitle === serverTitle) return serverTitle;
+  return serverTitle;
+}
+
 router.put('/docs/:id', (req, res) => {
   const userId = getCurrentUserId(req);
-  const { title, content, markdown, parentId, sortOrder, permission, allowedUsers, saveVersion, versionMessage } = req.body;
+  const { title, content, markdown, parentId, sortOrder, permission, allowedUsers, saveVersion, versionMessage, baseVersion } = req.body;
 
   const existing = dbQueries.getDocument(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Document not found' });
   if (!canUserAccess(existing, userId)) return res.status(403).json({ error: 'Access denied' });
 
-  const finalTitle = title !== undefined ? title : existing.title;
-  const finalContent = content !== undefined ? content : existing.content;
-  const finalMarkdown = markdown !== undefined ? markdown : existing.markdown;
+  let finalTitle = title !== undefined ? title : existing.title;
+  let finalContent = content !== undefined ? content : existing.content;
+  let finalMarkdown = markdown !== undefined ? markdown : existing.markdown;
+
+  const hasContentChange = title !== undefined || content !== undefined || markdown !== undefined;
+  const hasVersionConflict = typeof baseVersion === 'number' && baseVersion < existing.version;
+
+  if (hasContentChange && hasVersionConflict) {
+    if (markdown !== undefined) {
+      finalMarkdown = mergeText(existing.markdown, markdown);
+    }
+    if (title !== undefined) {
+      finalTitle = mergeTitle(existing.title, title, true, true);
+    }
+  }
 
   if (saveVersion) {
     dbQueries.createVersion(

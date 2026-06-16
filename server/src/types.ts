@@ -36,6 +36,7 @@ export interface Document {
   updatedBy: string;
   createdAt: number;
   updatedAt: number;
+  version: number;
 }
 
 export interface Version {

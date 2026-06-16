@@ -151,12 +151,18 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   },
 
   updateDoc: async (id: string, params: any) => {
-    const doc = await docsApi.update(id, params);
+    const latestDoc = get().currentDoc;
+    const payload: any = { ...params };
+    if (payload.baseVersion === undefined && latestDoc?.id === id && latestDoc.version !== undefined) {
+      payload.baseVersion = latestDoc.version;
+    }
+    const doc = await docsApi.update(id, payload);
     const docs = get().documents.map(d => d.id === id ? doc : d);
     set({ documents: docs, currentDoc: get().currentDocId === id ? doc : get().currentDoc });
     if (params?.saveVersion && get().currentDocId === id) {
       await get().loadVersions(id);
     }
+    return doc;
   },
 
   moveDoc: async (id: string, params) => {

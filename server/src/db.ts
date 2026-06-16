@@ -49,6 +49,9 @@ export function initDb() {
       if (!data.spaces) data.spaces = [];
       if (!data.documents) data.documents = [];
       if (!data.versions) data.versions = [];
+      data.documents.forEach(doc => {
+        if (doc.version === undefined) (doc as any).version = 1;
+      });
     } catch {
       seedInitialData();
     }
@@ -90,6 +93,7 @@ function seedInitialData() {
       updatedBy: 'user-1',
       createdAt: now,
       updatedAt: now,
+      version: 1,
     },
     {
       id: doc1Id,
@@ -106,6 +110,7 @@ function seedInitialData() {
       updatedBy: 'user-1',
       createdAt: now,
       updatedAt: now,
+      version: 1,
     },
     {
       id: folder2Id,
@@ -122,6 +127,7 @@ function seedInitialData() {
       updatedBy: 'user-1',
       createdAt: now,
       updatedAt: now,
+      version: 1,
     },
   ];
 
@@ -179,20 +185,29 @@ export const dbQueries = {
 
   getDocument: (id: string): Document | undefined => data.documents.find(d => d.id === id),
 
-  createDocument: (doc: Omit<Document, 'id' | 'createdAt' | 'updatedAt'>): Document => {
+  createDocument: (doc: Omit<Document, 'id' | 'createdAt' | 'updatedAt' | 'version'>): Document => {
     const id = uuidv4();
     const now = Date.now();
-    const newDoc: Document = { ...doc, id, createdAt: now, updatedAt: now };
+    const newDoc: Document = { ...doc, id, createdAt: now, updatedAt: now, version: 1 };
     data.documents.push(newDoc);
     saveData();
     return newDoc;
   },
 
-  updateDocument: (id: string, updates: Partial<Document>): Document | undefined => {
+  updateDocument: (id: string, updates: Partial<Document> & { _skipVersionBump?: boolean }): Document | undefined => {
     const idx = data.documents.findIndex(d => d.id === id);
     if (idx < 0) return undefined;
 
-    const merged: Document = { ...data.documents[idx], ...updates, updatedAt: Date.now() };
+    const current = data.documents[idx];
+    const skipBump = (updates as any)._skipVersionBump === true;
+    delete (updates as any)._skipVersionBump;
+
+    const merged: Document = {
+      ...current,
+      ...updates,
+      updatedAt: Date.now(),
+      version: skipBump ? current.version : current.version + 1,
+    };
     data.documents[idx] = merged;
     saveData();
     return merged;

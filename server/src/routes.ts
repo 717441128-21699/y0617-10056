@@ -22,12 +22,19 @@ function filterDocsForUser(docs: Document[], userId: string): Document[] {
   return docs.filter(doc => {
     if (doc.type === 'folder') return true;
     return canUserAccess(doc, userId);
-  }).map(doc => {
-    if (!canUserAccess(doc, userId)) {
-      return { ...doc, content: '', markdown: '', title: doc.title };
-    }
-    return doc;
   });
+}
+
+function stripPrivateContent(doc: Document, userId: string): Document {
+  if (!canUserAccess(doc, userId)) {
+    return {
+      ...doc,
+      title: '',
+      content: '',
+      markdown: '',
+    };
+  }
+  return doc;
 }
 
 router.get('/users', (_req, res) => {
@@ -96,21 +103,29 @@ router.put('/docs/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Document not found' });
   if (!canUserAccess(existing, userId)) return res.status(403).json({ error: 'Access denied' });
 
+  const finalTitle = title !== undefined ? title : existing.title;
+  const finalContent = content !== undefined ? content : existing.content;
+  const finalMarkdown = markdown !== undefined ? markdown : existing.markdown;
+
+  if (saveVersion) {
+    dbQueries.createVersion(
+      existing.id,
+      finalTitle,
+      finalContent,
+      finalMarkdown,
+      userId,
+      versionMessage
+    );
+  }
+
   const updates: any = { updatedBy: userId };
-  if (title !== undefined) updates.title = title;
-  if (content !== undefined) updates.content = content;
-  if (markdown !== undefined) updates.markdown = markdown;
-  if (parentId !== undefined) updates.parentId = parentId;
+  if (title !== undefined) updates.title = finalTitle;
+  if (content !== undefined) updates.content = finalContent;
+  if (markdown !== undefined) updates.markdown = finalMarkdown;
+  if (parentId !== undefined) updates.parentId = parentId || null;
   if (sortOrder !== undefined) updates.sortOrder = sortOrder;
   if (permission !== undefined) updates.permission = permission;
   if (allowedUsers !== undefined) updates.allowedUsers = allowedUsers;
-
-  if (saveVersion) {
-    const versionTitle = title !== undefined ? title : existing.title;
-    const versionContent = content !== undefined ? content : existing.content;
-    const versionMarkdown = markdown !== undefined ? markdown : existing.markdown;
-    dbQueries.createVersion(existing.id, versionTitle, versionContent, versionMarkdown, userId, versionMessage);
-  }
 
   const updated = dbQueries.updateDocument(req.params.id, updates);
   res.json(updated);
@@ -157,8 +172,14 @@ router.get('/docs/:id/versions', (req, res) => {
 });
 
 router.get('/versions/:id', (req, res) => {
+  const userId = getCurrentUserId(req);
   const version = dbQueries.getVersion(req.params.id);
   if (!version) return res.status(404).json({ error: 'Version not found' });
+
+  const doc = dbQueries.getDocument(version.docId);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  if (!canUserAccess(doc, userId)) return res.status(403).json({ error: 'Access denied' });
+
   res.json(version);
 });
 
@@ -172,12 +193,14 @@ router.get('/docs/:id/diff', (req, res) => {
 
   const fromV = dbQueries.getVersion(fromVersion);
   if (!fromV) return res.status(404).json({ error: 'fromVersion not found' });
+  if (fromV.docId !== doc.id) return res.status(400).json({ error: 'fromVersion does not belong to this document' });
 
   let toContent: string;
   let toTitle: string;
   if (toVersion) {
     const toV = dbQueries.getVersion(toVersion);
     if (!toV) return res.status(404).json({ error: 'toVersion not found' });
+    if (toV.docId !== doc.id) return res.status(400).json({ error: 'toVersion does not belong to this document' });
     toContent = toV.markdown;
     toTitle = toV.title;
   } else {
@@ -200,6 +223,7 @@ router.post('/docs/:id/rollback', (req, res) => {
 
   const version = dbQueries.getVersion(versionId);
   if (!version) return res.status(404).json({ error: 'Version not found' });
+  if (version.docId !== doc.id) return res.status(400).json({ error: 'Version does not belong to this document' });
 
   dbQueries.createVersion(doc.id, doc.title, doc.content, doc.markdown, userId, '回滚前自动保存');
 
@@ -217,7 +241,9 @@ router.get('/search', (req, res) => {
   const { q, spaceId } = req.query as { q: string; spaceId?: string };
   if (!q) return res.json([]);
   const results = dbQueries.searchDocuments(q, spaceId);
-  const filtered = results.filter(doc => canUserAccess(doc, userId));
+  const filtered = results
+    .filter(doc => canUserAccess(doc, userId))
+    .map(doc => stripPrivateContent(doc, userId));
   res.json(filtered);
 });
 

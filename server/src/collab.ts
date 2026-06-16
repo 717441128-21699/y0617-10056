@@ -173,6 +173,16 @@ export function setupSocketIO(io: Server) {
       }
     });
 
+    socket.on('doc-edit', ({ docId, title, content, markdown }: { docId: string; title: string; content: string; markdown: string }) => {
+      socket.to(`doc:${docId}`).emit('doc-edit', {
+        docId,
+        title,
+        content,
+        markdown,
+        from: socket.id,
+      });
+    });
+
     socket.on('disconnect', () => {
       onlineUsers.forEach((users, docId) => {
         if (users.has(socket.id)) {

@@ -19,15 +19,31 @@ export default function EditorView() {
   const getDraft = useAppStore(s => s.getDraft);
   const clearDraft = useAppStore(s => s.clearDraft);
   const setOnlineUsers = useAppStore(s => s.setOnlineUsers);
+  const loadVersions = useAppStore(s => s.loadVersions);
 
   const socketRef = useRef<Socket | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedDocIdRef = useRef<string | null>(null);
   const isRemoteUpdateRef = useRef(false);
 
   const [localTitle, setLocalTitle] = useState('');
   const [localContent, setLocalContent] = useState('');
   const [localMarkdown, setLocalMarkdown] = useState('');
+
+  const localTitleRef = useRef('');
+  const localContentRef = useRef('');
+  const localMarkdownRef = useRef('');
+
+  const syncRefs = useCallback((t?: string, c?: string, m?: string) => {
+    if (t !== undefined) localTitleRef.current = t;
+    if (c !== undefined) localContentRef.current = c;
+    if (m !== undefined) localMarkdownRef.current = m;
+  }, []);
+
+  useEffect(() => { localTitleRef.current = localTitle; }, [localTitle]);
+  useEffect(() => { localContentRef.current = localContent; }, [localContent]);
+  useEffect(() => { localMarkdownRef.current = localMarkdown; }, [localMarkdown]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -40,32 +56,39 @@ export default function EditorView() {
     });
     socketRef.current = socket;
     socket.on('online-users', (users) => setOnlineUsers(users));
-    return () => { socket.disconnect(); };
-  }, [currentUser?.id, setOnlineUsers]);
 
-  useEffect(() => {
-    if (!currentDoc || !socketRef.current) return;
-    const socket = socketRef.current;
+    socket.on('doc-edit', ({ docId, title, content, markdown, from }: { docId: string; title: string; content: string; markdown: string; from: string }) => {
+      if (!currentDoc || docId !== currentDoc.id) return;
+      if (from === socket.id) return;
+      isRemoteUpdateRef.current = true;
+      setLocalTitle(title);
+      setLocalContent(content);
+      setLocalMarkdown(markdown);
+      syncRefs(title, content, markdown);
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 50);
+    });
 
-    socket.emit('join-doc', { docId: currentDoc.id });
-
-    const handler = ({ docId, title, content, markdown }: { docId: string; title?: string; content?: string; markdown?: string }) => {
-      if (docId !== currentDoc.id) return;
+    socket.on('doc-changed', ({ docId, title, content, markdown }: { docId: string; title?: string; content?: string; markdown?: string }) => {
+      if (!currentDoc || docId !== currentDoc.id) return;
       if (title !== undefined && content !== undefined && markdown !== undefined) {
         isRemoteUpdateRef.current = true;
         setLocalTitle(title);
         setLocalContent(content);
         setLocalMarkdown(markdown);
-        isRemoteUpdateRef.current = false;
-      } else {
-        useAppStore.getState().selectDoc(currentDoc.id);
+        syncRefs(title, content, markdown);
+        setTimeout(() => { isRemoteUpdateRef.current = false; }, 50);
       }
-    };
-    socket.on('doc-changed', handler);
+    });
 
+    return () => { socket.disconnect(); };
+  }, [currentUser?.id, currentDoc?.id, setOnlineUsers, syncRefs]);
+
+  useEffect(() => {
+    if (!currentDoc || !socketRef.current) return;
+    const socket = socketRef.current;
+    socket.emit('join-doc', { docId: currentDoc.id });
     return () => {
       socket.emit('leave-doc', { docId: currentDoc.id });
-      socket.off('doc-changed', handler);
       setOnlineUsers([]);
     };
   }, [currentDoc?.id, setOnlineUsers]);
@@ -75,6 +98,7 @@ export default function EditorView() {
       setLocalTitle('');
       setLocalContent('');
       setLocalMarkdown('');
+      syncRefs('', '', '');
       lastSavedDocIdRef.current = null;
       return;
     }
@@ -88,6 +112,7 @@ export default function EditorView() {
         setLocalTitle(draft.title);
         setLocalContent(draft.content);
         setLocalMarkdown(draft.markdown);
+        syncRefs(draft.title, draft.content, draft.markdown);
         return;
       } else {
         clearDraft(currentDoc.id);
@@ -97,7 +122,21 @@ export default function EditorView() {
     setLocalTitle(currentDoc.title);
     setLocalContent(currentDoc.content);
     setLocalMarkdown(currentDoc.markdown);
-  }, [currentDoc?.id, currentDoc?.updatedAt]);
+    syncRefs(currentDoc.title, currentDoc.content, currentDoc.markdown);
+  }, [currentDoc?.id, currentDoc?.updatedAt, getDraft, clearDraft, syncRefs]);
+
+  const broadcastEdit = useCallback(() => {
+    if (!currentDoc || !socketRef.current || isRemoteUpdateRef.current) return;
+    if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+    broadcastTimerRef.current = setTimeout(() => {
+      socketRef.current?.emit('doc-edit', {
+        docId: currentDoc.id,
+        title: localTitleRef.current,
+        content: localContentRef.current,
+        markdown: localMarkdownRef.current,
+      });
+    }, 150);
+  }, [currentDoc?.id]);
 
   const triggerAutoSave = useCallback(() => {
     if (!currentDoc) return;
@@ -106,9 +145,9 @@ export default function EditorView() {
     autoSaveTimerRef.current = setTimeout(async () => {
       if (isRemoteUpdateRef.current) return;
 
-      const title = localTitle;
-      const content = localContent;
-      const markdown = localMarkdown;
+      const title = localTitleRef.current;
+      const content = localContentRef.current;
+      const markdown = localMarkdownRef.current;
       const latestDoc = useAppStore.getState().currentDoc;
       if (!latestDoc) return;
 
@@ -119,35 +158,43 @@ export default function EditorView() {
         socketRef.current?.emit('doc-updated', { docId: latestDoc.id });
       }
     }, 2000);
-  }, [currentDoc?.id, localTitle, localContent, localMarkdown, updateDoc, saveDraft, clearDraft]);
+  }, [currentDoc?.id, updateDoc, saveDraft, clearDraft]);
 
   const handleContentChange = useCallback((content: string, markdown: string) => {
     setLocalContent(content);
     setLocalMarkdown(markdown);
+    syncRefs(undefined, content, markdown);
+    broadcastEdit();
     triggerAutoSave();
-  }, [triggerAutoSave]);
+  }, [broadcastEdit, triggerAutoSave, syncRefs]);
 
   const handleTitleChange = useCallback((title: string) => {
     setLocalTitle(title);
+    syncRefs(title, undefined, undefined);
+    broadcastEdit();
     triggerAutoSave();
-  }, [triggerAutoSave]);
+  }, [broadcastEdit, triggerAutoSave, syncRefs]);
 
   const handleSaveVersion = useCallback(async () => {
     if (!currentDoc) return;
     const message = prompt('版本说明（可选）:');
     await updateDoc(currentDoc.id, {
-      title: localTitle,
-      content: localContent,
-      markdown: localMarkdown,
+      title: localTitleRef.current,
+      content: localContentRef.current,
+      markdown: localMarkdownRef.current,
       saveVersion: true,
       versionMessage: message || undefined,
     });
     clearDraft(currentDoc.id);
+    await loadVersions(currentDoc.id);
     alert('版本已保存');
-  }, [currentDoc?.id, localTitle, localContent, localMarkdown, updateDoc, clearDraft]);
+  }, [currentDoc?.id, updateDoc, clearDraft, loadVersions]);
 
   useEffect(() => {
-    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+    };
   }, []);
 
   if (!currentDoc) {
@@ -213,7 +260,7 @@ export default function EditorView() {
             placeholder="无标题文档"
             className="w-full text-3xl font-bold text-gray-900 placeholder-gray-300 outline-none bg-transparent"
           />
-          <div className="mt-2 mb-4 text-xs text-gray-400">编辑时自动保存草稿</div>
+          <div className="mt-2 mb-4 text-xs text-gray-400">编辑时自动保存草稿，实时同步到协作者</div>
         </div>
 
         <div className="flex-1 overflow-y-auto">

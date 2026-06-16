@@ -9,7 +9,7 @@ interface DiffData {
 }
 
 export default function VersionPanel() {
-  const { currentDoc, versions, users, rollbackToVersion } = useAppStore();
+  const { currentDoc, versions, users, rollbackToVersion, loadVersions } = useAppStore();
   const [showDiff, setShowDiff] = useState(false);
   const [compareFrom, setCompareFrom] = useState<string | null>(null);
   const [compareTo, setCompareTo] = useState<string | null>(null);
@@ -36,9 +36,9 @@ export default function VersionPanel() {
 
   if (!currentDoc) return null;
 
-  const handleRollback = (versionId: string) => {
+  const handleRollback = async (versionId: string) => {
     if (confirm('确定要回滚到此版本吗？当前内容会被保存为新版本。')) {
-      rollbackToVersion(currentDoc.id, versionId);
+      await rollbackToVersion(currentDoc.id, versionId);
       setShowDiff(false);
       setCompareFrom(null);
       setCompareTo(null);
@@ -78,8 +78,22 @@ export default function VersionPanel() {
 
       {!showDiff ? (
         <div className="flex-1 overflow-y-auto scrollbar-thin">
+          <div className="p-3 bg-blue-50 border-b border-blue-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-blue-700">当前文档</span>
+                <span className="px-1.5 py-0.5 text-[10px] bg-blue-600 text-white rounded">最新</span>
+              </div>
+            </div>
+            <div className="mt-1 text-xs text-blue-600 flex items-center gap-2">
+              <span>{getUserName(currentDoc.updatedBy)}</span>
+              <span>·</span>
+              <span>{formatTime(currentDoc.updatedAt)}</span>
+            </div>
+          </div>
+
           {versions.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-gray-400">
+            <div className="px-4 py-6 text-center text-sm text-gray-400">
               暂无历史版本
               <p className="mt-1 text-xs">点击「保存版本」按钮创建版本</p>
             </div>
@@ -90,7 +104,7 @@ export default function VersionPanel() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-900">
-                        {idx === 0 ? '当前版本' : `版本 ${versions.length - idx}`}
+                        版本 {versions.length - idx}
                       </span>
                       {version.message && (
                         <span className="text-xs text-gray-500">
@@ -114,16 +128,14 @@ export default function VersionPanel() {
                     <span>·</span>
                     <span>{formatTime(version.createdAt)}</span>
                   </div>
-                  {idx > 0 && (
-                    <div className="mt-2">
-                      <button
-                        onClick={() => handleRollback(version.id)}
-                        className="text-xs text-red-600 hover:underline"
-                      >
-                        回滚到此版本
-                      </button>
-                    </div>
-                  )}
+                  <div className="mt-2">
+                    <button
+                      onClick={() => handleRollback(version.id)}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      回滚到此版本
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -140,7 +152,7 @@ export default function VersionPanel() {
             >
               {versions.map((v, i) => (
                 <option key={v.id} value={v.id}>
-                  {i === 0 ? '当前版本' : `版本 ${versions.length - i}`} - {formatTime(v.createdAt)}
+                  版本 {versions.length - i} - {formatTime(v.createdAt)}{v.message ? ` · ${v.message}` : ''}
                 </option>
               ))}
             </select>
@@ -155,7 +167,7 @@ export default function VersionPanel() {
               <option value="">（当前文档）</option>
               {versions.map((v, i) => (
                 <option key={v.id} value={v.id}>
-                  {i === 0 ? '当前版本' : `版本 ${versions.length - i}`} - {formatTime(v.createdAt)}
+                  版本 {versions.length - i} - {formatTime(v.createdAt)}{v.message ? ` · ${v.message}` : ''}
                 </option>
               ))}
             </select>
